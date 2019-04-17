@@ -1651,6 +1651,13 @@ class DataObjectController extends ElementControllerBase implements EventedContr
 
                     // save
                     $object = DataObject::getById($data['id']);
+                    if (count($data == 2)
+                        && key_exists('published', $data)
+                        && is_object($object->getLatestVersion())) {
+                        //this is a special case. All we do is unpublish an object and don't want to lose the
+                        //subsequently entered data
+                        $object = $object->getLatestVersion()->getData();
+                    }
                     /** @var DataObject\ClassDefinition $class */
                     $class = $object->getClass();
 
