@@ -14,6 +14,7 @@
 
 namespace Pimcore\Bundle\AdminBundle\Controller\Admin\DataObject;
 
+use phpDocumentor\Reflection\DocBlock\Tags\Version;
 use Pimcore\Bundle\AdminBundle\Controller\Admin\ElementControllerBase;
 use Pimcore\Bundle\AdminBundle\Helper\GridHelperService;
 use Pimcore\Controller\Configuration\TemplatePhp;
@@ -1644,20 +1645,24 @@ class DataObjectController extends ElementControllerBase implements EventedContr
         }
 
         if (isset($allParams['data']) && $allParams['data']) {
+            //we need to make sure that unpublished changes are not lost
+            $hasUnpublishedVersions = false;
             $this->checkCsrfToken($request);
             if ($allParams['xaction'] == 'update') {
                 try {
                     $data = $this->decodeJson($allParams['data']);
 
-                    // save
+                    //save
                     $object = DataObject::getById($data['id']);
-                    if (count($data == 2)
-                        && key_exists('published', $data)
-                        && is_object($object->getLatestVersion())) {
-                        //this is a special case. All we do is unpublish an object and don't want to lose the
-                        //subsequently entered data
-                        $object = $object->getLatestVersion()->getData();
+                    $latestVersion = $object->getLatestVersion();
+                    if (is_object($latestVersion)
+                        && $latestVersion->getDate() > $object->getModificationDate()) {
+                        //when doing bulk action we need to make sure that unpublished data is not lost
+                        $hasUnpublishedVersions = true;
+                        $backupObject = $object->getLatestVersion()->getData();
+
                     }
+
                     /** @var DataObject\ClassDefinition $class */
                     $class = $object->getClass();
 
@@ -1713,9 +1718,6 @@ class DataObjectController extends ElementControllerBase implements EventedContr
                                         }
                                     }
 
-                                    $activeGroups = $classificationStoreData->getActiveGroups() ? $classificationStoreData->getActiveGroups() : [];
-                                    $activeGroups[$groupId] = true;
-                                    $classificationStoreData->setActiveGroups($activeGroups);
                                     $classificationStoreData->setLocalizedKeyValue($groupId, $keyid, $value, $csLanguage);
                                 }
                             }
@@ -1789,8 +1791,20 @@ class DataObjectController extends ElementControllerBase implements EventedContr
                     }
 
                     $object->setValues($objectData);
-
                     $object->save();
+
+                    if ($hasUnpublishedVersions) {
+                        //set values for the latest version and save
+                        //to avoid overriding the unpublished version
+                        $backupObject->setValues($objectData);
+                        $version = new \Pimcore\Model\Version();
+                        $version->setCid($backupObject->getId());
+                        $version->setDate(time()+1);
+                        $version->setData($backupObject);
+                        $version->setUserId(Tool\Admin::getCurrentUser()->getId());
+                        $version->setCtype('object');
+                        $version->save();
+                    }
 
                     return $this->adminJson(['data' => DataObject\Service::gridObjectData($object, $allParams['fields'], $requestedLanguage), 'success' => true]);
                 } catch (\Exception $e) {
