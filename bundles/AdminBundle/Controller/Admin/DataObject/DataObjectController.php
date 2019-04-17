@@ -1655,6 +1655,7 @@ class DataObjectController extends ElementControllerBase implements EventedContr
                     //save
                     $object = DataObject::getById($data['id']);
                     $latestVersion = $object->getLatestVersion();
+                    //back up the last unpublished version so it's not lost
                     if (is_object($latestVersion)
                         && $latestVersion->getDate() > $object->getModificationDate()) {
                         //when doing bulk action we need to make sure that unpublished data is not lost
@@ -1796,6 +1797,10 @@ class DataObjectController extends ElementControllerBase implements EventedContr
                     if ($hasUnpublishedVersions) {
                         //set values for the latest version and save
                         //to avoid overriding the unpublished version
+
+                        //we need to make sure the backup version is published after previous
+                        //so the system won't confuse the two
+                        sleep(1);
                         $backupObject->setValues($objectData);
                         $version = new \Pimcore\Model\Version();
                         $version->setCid($backupObject->getId());
