@@ -2152,8 +2152,19 @@ class DataObjectHelperController extends AdminController
                 if (!$object->isAllowed('publish')) {
                     throw new \Exception("Permission denied. You don't have the rights to save this object.");
                 }
-
+                $hasUnpublishedVersions = false;
+                $backupObject = null;
                 $append = $request->get('append');
+
+                $latestVersion = $object->getLatestVersion();
+                //back up the last unpublished version so it's not lost
+                if (is_object($latestVersion)
+                    && $latestVersion->getDate() > $object->getModificationDate()) {
+                    //when doing bulk action we need to make sure that unpublished data is not lost
+                    $hasUnpublishedVersions = true;
+                    $backupObject = $object->getLatestVersion()->getData();
+
+                }
 
                 $className = $object->getClassName();
                 $class = DataObject\ClassDefinition::getByName($className);
@@ -2223,6 +2234,9 @@ class DataObjectHelperController extends AdminController
                         $keyValuePairs->setPropertyWithId($keyid, $value, true);
 
                         $object->$setter($keyValuePairs);
+                        if ($backupObject) {
+                            $backupObject->$setter($keyValuePairs);
+                        }
                     }
                 } elseif (count($parts) > 1) {
                     // check for bricks
@@ -2264,6 +2278,9 @@ class DataObjectHelperController extends AdminController
                             $newData = $field->appendData($existingData, $newData);
                         }
                         $object->setValue($name, $newData);
+                        if ($backupObject) {
+                            $backupObject->setValue($name, $newData);
+                        }
                     } else {
                         // check if it is a localized field
                         if ($request->get('language')) {
@@ -2281,6 +2298,9 @@ class DataObjectHelperController extends AdminController
                                     }
 
                                     $object->$setter($newData, $request->get('language'));
+                                    if ($backupObject) {
+                                        $backupObject->$setter($newData, $request->get('language'));
+                                    }
                                 }
                             }
                         }
@@ -2289,8 +2309,15 @@ class DataObjectHelperController extends AdminController
                         if ($name == 'published') {
                             if ($value == 'false' || empty($value)) {
                                 $object->setPublished(false);
+                                if ($backupObject) {
+                                    $backupObject->setPublished(false);
+                                }
                             } else {
                                 $object->setPublished(true);
+                                if ($backupObject) {
+                                    $backupObject->setPublished(true);
+                                }
+
                             }
                         }
                     }
@@ -2302,6 +2329,24 @@ class DataObjectHelperController extends AdminController
                     $object->setUserModification($this->getAdminUser()->getId());
                     $object->save();
                     $success = true;
+
+                    if ($hasUnpublishedVersions) {
+                        //set values for the latest version and save
+                        //to avoid overriding the unpublished version
+
+                        $version = new \Pimcore\Model\Version();
+                        $version->setCid($backupObject->getId());
+                        //we need to make sure the backup version is published after previous
+                        //so the system won't confuse the two
+                        $version->setDate(time()+1);
+                        $version->setData($backupObject);
+                        $version->setNote('backup');
+                        $version->setUserId(Tool\Admin::getCurrentUser()->getId());
+                        $version->setVersionCount($object->getVersionCount());
+                        $version->setCtype('object');
+                        $version->save();
+                    }
+
                 } catch (\Exception $e) {
                     return $this->adminJson(['success' => false, 'message' => $e->getMessage()]);
                 }
@@ -2318,6 +2363,7 @@ class DataObjectHelperController extends AdminController
 
         return $this->adminJson(['success' => $success]);
     }
+
 
     /**
      * @Route("/get-available-visible-vields", methods={"GET"})
